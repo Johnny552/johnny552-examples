@@ -9,10 +9,10 @@ echo "Building firmware..."
 make clean
 make
 
-HEX=core.ihx
+HEX=build/core.ihx
 if [ ! -f "$HEX" ]; then
-	echo "Error: $HEX not found after build" >&2
-	exit 2
+        echo "Error: $HEX not found after build" >&2
+        exit 2
 fi
 
 if ! command -v wchisp >/dev/null 2>&1; then

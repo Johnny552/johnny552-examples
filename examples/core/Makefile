@@ -1,21 +1,69 @@
 TARGET = core
+BUILD_DIR = build
 
-# Use ch554_sdcc working library
+# Toolchain
+CC = sdcc
+OBJCOPY = objcopy
+PACK_HEX = packihx
+WCHISP = wchisptool -g -f
+
+# Configuration
+FREQ_SYS = 24000000
+XRAM_SIZE = 0x0100
+XRAM_LOC = 0x0100
+CODE_SIZE = 0x3800
+
+# Source files
 C_FILES = \
 	main.c \
 	lib/sk6812/sk6812.c \
 	lib/usb_hid/debug.c
 
+# Include paths
 INC_DIRS = \
 	-Ilib/usb_hid \
-	-Ilib/sk6812
+	-Ilib/sk6812 \
+	-I../../include
 
-# Match working MIDI example configuration
-XRAM_SIZE = 0x0100
-XRAM_LOC = 0x0100
+# Compiler flags
+CFLAGS = -V -mmcs51 --model-small \
+	--xram-size $(XRAM_SIZE) --xram-loc $(XRAM_LOC) \
+	--code-size $(CODE_SIZE) \
+	$(INC_DIRS) -DFREQ_SYS=$(FREQ_SYS)
 
+LFLAGS = $(CFLAGS)
 
-pre-flash:
-	
+# Object files in build directory
+OBJS = $(addprefix $(BUILD_DIR)/,$(notdir $(C_FILES:.c=.rel)))
 
-include ../Makefile.include
+.PHONY: all clean flash
+
+all: $(BUILD_DIR)/$(TARGET).bin $(BUILD_DIR)/$(TARGET).hex
+
+$(BUILD_DIR)/%.rel: %.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -c $(CFLAGS) $< -o $@
+
+$(BUILD_DIR)/%.rel: lib/sk6812/%.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -c $(CFLAGS) $< -o $@
+
+$(BUILD_DIR)/%.rel: lib/usb_hid/%.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -c $(CFLAGS) $< -o $@
+
+$(BUILD_DIR)/$(TARGET).ihx: $(OBJS)
+	@mkdir -p $(BUILD_DIR)
+	cd $(BUILD_DIR) && $(CC) $(notdir $(OBJS)) $(LFLAGS) -o $(TARGET).ihx
+
+$(BUILD_DIR)/$(TARGET).hex: $(BUILD_DIR)/$(TARGET).ihx
+	$(PACK_HEX) $< > $@
+
+$(BUILD_DIR)/$(TARGET).bin: $(BUILD_DIR)/$(TARGET).ihx
+	$(OBJCOPY) -I ihex -O binary $< $@
+
+flash: $(BUILD_DIR)/$(TARGET).bin
+	$(WCHISP) $<
+
+clean:
+	rm -rf $(BUILD_DIR)
