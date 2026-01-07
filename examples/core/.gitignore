@@ -1,0 +1,13 @@
+# Build artifacts
+*.ihx
+*.lk
+*.lst
+*.map
+*.mem
+*.rel
+*.rst
+*.sym
+*.asm
+*.o
+*.bin
+*.hex
