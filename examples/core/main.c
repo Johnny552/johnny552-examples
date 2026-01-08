@@ -276,7 +276,7 @@ void DeviceInterrupt(void) __interrupt (INT_NO_USB)					   //USB中断服务程�
 							mDelaymS(50);
 							sk6812_send_rgbw(0, 0, 0, 0);
 							
-							// Prepare sensor data in EP0 buffer
+							// Prepare sensor data in EP0 buffer (with calibration applied)
 							Ep0Buffer[0] = 0x01;  // Report ID
 							Ep0Buffer[1] = (uint8_t)(temperature >> 8);    // Temperature high byte
 							Ep0Buffer[2] = (uint8_t)(temperature & 0xFF);  // Temperature low byte

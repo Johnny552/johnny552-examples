@@ -38,7 +38,7 @@ try:
             print("Error: Sensor read failed!")
             sys.exit(1)
         
-        # Parse sensor data
+        # Parse sensor data (calibrated values from firmware)
         # Temperature: signed int16, °C × 10
         temp_raw = struct.unpack('>h', bytes(data[1:3]))[0]  # Big-endian signed 16-bit
         temperature = temp_raw / 10.0
@@ -47,7 +47,7 @@ try:
         hum_raw = struct.unpack('>H', bytes(data[3:5]))[0]  # Big-endian unsigned 16-bit
         humidity = hum_raw / 10.0
         
-        print(f"Temperature: {temperature:.1f}°C")
+        print(f"Temperature: {temperature:.1f}°C (calibrated)")
         print(f"Humidity: {humidity:.1f}%")
             
 except PermissionError:
