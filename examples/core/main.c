@@ -14,6 +14,8 @@
 #include "lib/usb_hid/ch554_usb.h"
 #include "lib/usb_hid/debug.h"
 #include "lib/sk6812/sk6812.h"
+#include "lib/aht21/aht21.h"
+#include "lib/i2c_local.h"  // Local I2C with slower timing for 0.1uF cap
 
 __xdata __at (0x0000) uint8_t  Ep0Buffer[DEFAULT_ENDP0_SIZE];	   // Endpoint 0 OUT & IN buffer, must be even address
 __xdata __at (0x0040) uint8_t  Ep1Buffer[DEFAULT_ENDP1_SIZE];	   // Endpoint 1 upload buffer
@@ -243,6 +245,66 @@ void DeviceInterrupt(void) __interrupt (INT_NO_USB)					   //USB中断服务程�
 				{
 					switch( SetupReq )
 					{
+					case 0x01:	// GET_REPORT (HID class request)
+					{
+						int16_t temperature = 0;
+						uint16_t humidity = 0;
+						uint8_t sensor_status;
+						uint8_t retry_count = 0;
+						
+						// Trigger AHT21 measurement
+						aht21_trigger();
+						
+						// Datasheet requires >80ms delay after trigger
+						// With slow I2C we need more time
+						mDelaymS(100);  // Wait 100ms (was 80ms)
+						
+						// Retry up to 3 times if sensor is still busy
+						do {
+							sensor_status = aht21_read(&temperature, &humidity);
+							if (sensor_status == 1) {  // Sensor busy (status bit[7] = 1)
+								mDelaymS(20);  // Wait a bit more
+								retry_count++;
+							} else {
+								break;  // Success or other error
+							}
+						} while (retry_count < 3);
+						
+						if(sensor_status == 0) {
+							// Success - flash green briefly
+							sk6812_send_rgbw(0, 100, 0, 0);
+							mDelaymS(50);
+							sk6812_send_rgbw(0, 0, 0, 0);
+							
+							// Prepare sensor data in EP0 buffer
+							Ep0Buffer[0] = 0x01;  // Report ID
+							Ep0Buffer[1] = (uint8_t)(temperature >> 8);    // Temperature high byte
+							Ep0Buffer[2] = (uint8_t)(temperature & 0xFF);  // Temperature low byte
+							Ep0Buffer[3] = (uint8_t)(humidity >> 8);       // Humidity high byte
+							Ep0Buffer[4] = (uint8_t)(humidity & 0xFF);     // Humidity low byte
+							Ep0Buffer[5] = 0;
+							Ep0Buffer[6] = 0;
+							Ep0Buffer[7] = 0;
+						} else {
+							// Error - flash red briefly and return error marker
+							sk6812_send_rgbw(100, 0, 0, 0);
+							mDelaymS(50);
+							sk6812_send_rgbw(0, 0, 0, 0);
+							
+							Ep0Buffer[0] = 0x01;  // Report ID
+							Ep0Buffer[1] = 0xFF;  // Error marker
+							Ep0Buffer[2] = 0xFF;
+							Ep0Buffer[3] = 0xFF;
+							Ep0Buffer[4] = 0xFF;
+							Ep0Buffer[5] = sensor_status;  // Debug: error code
+							Ep0Buffer[6] = retry_count;     // Debug: retry count
+							Ep0Buffer[7] = 0;
+						}
+						
+						pDescr = Ep0Buffer;  // Point to our buffer
+						len = 8;  // Return 8 bytes
+						break;
+					}
 					case 0x09:	// SET_REPORT (HID class request)
 						// Will receive data in OUT stage, handled in UIS_TOKEN_OUT
 						len = 0;	// ACK the SETUP stage
@@ -485,6 +547,14 @@ void DeviceInterrupt(void) __interrupt (INT_NO_USB)					   //USB中断服务程�
 		case UIS_TOKEN_IN | 0:													  //endpoint0 IN
 			switch(SetupReq)
 			{
+			case 0x01:  // GET_REPORT - send data back to host
+				len = SetupLen >= DEFAULT_ENDP0_SIZE ? DEFAULT_ENDP0_SIZE : SetupLen;
+				memcpy( Ep0Buffer, pDescr, len );  // Copy data to EP0 buffer
+				SetupLen -= len;
+				pDescr += len;
+				UEP0_T_LEN = len;
+				UEP0_CTRL ^= bUEP_T_TOG;  // Toggle sync bit
+				break;
 			case USB_GET_DESCRIPTOR:
 				len = SetupLen >= DEFAULT_ENDP0_SIZE ? DEFAULT_ENDP0_SIZE : SetupLen;								 //本次传输长度
 				memcpy( Ep0Buffer, pDescr, len );								   //加载上传数据
@@ -620,24 +690,32 @@ void main()
 	// SK6812 LED init
 	sk6812_init();
 	
-	// Boot test: R, G, B sequence
-	// Red
-	sk6812_send_rgbw(255, 0, 0, 0);
-	mDelaymS(1000);
-	sk6812_send_rgbw(0, 0, 0, 0);
-	mDelaymS(500);
+	// Test: Turn LED blue for 2 seconds to confirm LED works
+	sk6812_send_rgbw(0, 0, 255, 0);  // Blue
+	mDelaymS(2000);
+	sk6812_send_rgbw(0, 0, 0, 0);    // Off
 	
-	// Green
-	sk6812_send_rgbw(0, 255, 0, 0);
-	mDelaymS(1000);
-	sk6812_send_rgbw(0, 0, 0, 0);
-	mDelaymS(500);
+	// Disable alternate functions on P3.3 and P3.4
+	PIN_FUNC &= ~bUART1_PIN_X;  // UART1 stays on P1.6/P1.7
+	PIN_FUNC &= ~bPWM2_PIN_X;   // PWM2 stays on P3.0
 	
-	// Blue
-	sk6812_send_rgbw(0, 0, 255, 0);
-	mDelaymS(1000);
-	sk6812_send_rgbw(0, 0, 0, 0);
-	mDelaymS(500);
+	// CRITICAL: Power stability for AHT21 (board has only 0.1uF, not 10uF)
+	// Give sensor extra time to stabilize with small decoupling cap
+	mDelaymS(500);  // Extended delay for power stability
+	
+	// Configure P3.3 and P3.4 as OPEN-DRAIN outputs (correct for I2C with 4.5k pull-ups!)
+	P3_MOD_OC |= ((1<<3) | (1<<4));   // Set bits = open-drain mode
+	P3_DIR_PU &= ~((1<<3) | (1<<4));  // Clear bits = output mode
+	
+	// Initialize I2C bus FIRST (sets pins high)
+	i2c_init();
+	
+	// Wait longer for sensor - datasheet says 100ms, but with only 0.1uF cap we need more
+	mDelaymS(200);
+	
+	// Initialize AHT21 sensor
+	uint8_t init_status = aht21_init();
+	mDelaymS(20);  // Wait for sensor to stabilize
 	
 	// USB init
 	USBDeviceCfg();
@@ -647,10 +725,33 @@ void main()
 	UEP1_T_LEN = 0;
 	UEP2_T_LEN = 0;
 	
-	// Success indicator: 1 green flash
-	sk6812_send_rgbw(0, 255, 0, 0);
-	mDelaymS(200);
-	sk6812_send_rgbw(0, 0, 0, 0);
+	// Visual indicator of sensor init status:
+	// 0 = Success (1 green flash)
+	// 1 = Sensor not responding (2 red flashes)
+	// 2 = Sensor not calibrated (2 yellow flashes)
+	if (init_status == 0) {
+		sk6812_send_rgbw(0, 255, 0, 0);  // Green: Success
+		mDelaymS(200);
+		sk6812_send_rgbw(0, 0, 0, 0);
+	} else if (init_status == 1) {
+		// Flash red twice for init error
+		sk6812_send_rgbw(255, 0, 0, 0);
+		mDelaymS(150);
+		sk6812_send_rgbw(0, 0, 0, 0);
+		mDelaymS(100);
+		sk6812_send_rgbw(255, 0, 0, 0);
+		mDelaymS(150);
+		sk6812_send_rgbw(0, 0, 0, 0);
+	} else {
+		// Flash yellow twice for not calibrated
+		sk6812_send_rgbw(255, 255, 0, 0);
+		mDelaymS(150);
+		sk6812_send_rgbw(0, 0, 0, 0);
+		mDelaymS(100);
+		sk6812_send_rgbw(255, 255, 0, 0);
+		mDelaymS(150);
+		sk6812_send_rgbw(0, 0, 0, 0);
+	}
 	
 	while(1)
 	{

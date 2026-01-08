@@ -17,12 +17,16 @@ CODE_SIZE = 0x3800
 C_FILES = \
 	main.c \
 	lib/sk6812/sk6812.c \
-	lib/usb_hid/debug.c
+	lib/usb_hid/debug.c \
+	lib/aht21/aht21.c \
+	lib/i2c_local.c
 
 # Include paths
 INC_DIRS = \
 	-Ilib/usb_hid \
 	-Ilib/sk6812 \
+	-Ilib/aht21 \
+	-Ilib \
 	-I../../include
 
 # Compiler flags
@@ -49,6 +53,18 @@ $(BUILD_DIR)/%.rel: lib/sk6812/%.c
 	$(CC) -c $(CFLAGS) $< -o $@
 
 $(BUILD_DIR)/%.rel: lib/usb_hid/%.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -c $(CFLAGS) $< -o $@
+
+$(BUILD_DIR)/%.rel: lib/aht21/%.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -c $(CFLAGS) $< -o $@
+
+$(BUILD_DIR)/%.rel: lib/%.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -c $(CFLAGS) $< -o $@
+
+$(BUILD_DIR)/%.rel: ../../include/%.c
 	@mkdir -p $(BUILD_DIR)
 	$(CC) -c $(CFLAGS) $< -o $@
 

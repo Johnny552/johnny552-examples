@@ -31,7 +31,7 @@ void i2c_init()
 
 void i2c_delay()
 {
-	volatile char i = 1;
+	volatile char i = 50;
 	while(i--);
 }
 
