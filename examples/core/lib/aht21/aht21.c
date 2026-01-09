@@ -185,7 +185,7 @@ uint8_t aht21_read(int16_t *temperature, uint16_t *humidity) {
     // Temperature: T°C = (raw / 2^20) * 200 - 50
     // We'll return temperature * 10 (e.g., 235 = 23.5°C)
     // Calibration: -70 (= -7.0°C) to compensate for self-heating from CH552 electronics
-    #define TEMP_CALIBRATION_OFFSET (-52  // Temperature offset in tenths of degree (-5.2°C)
+    #define TEMP_CALIBRATION_OFFSET (-52) // Temperature offset in tenths of degree (-5.2°C)
     *temperature = (int16_t)(((raw_temp * 2000) / 1048576) - 500 + TEMP_CALIBRATION_OFFSET);
     
     return 0;  // Success
